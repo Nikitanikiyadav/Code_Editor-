@@ -89,7 +89,7 @@ REST_FRAMEWORK = {
         "rest_framework.permissions.IsAuthenticated",
     ],
     # Rate limiting: max 20 login/register attempts per minute per IP
-    "DEFAULT_THROTTLE_RATES": {"auth": "20/min"},
+    "DEFAULT_THROTTLE_RATES": {"auth": "20/min", "room_join": "30/min"},
 }
 
 # ---- Cookie security ----
