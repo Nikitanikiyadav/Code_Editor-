@@ -23,33 +23,36 @@ const STATUS_LABEL = {
 export default function EditorPane({
   roomCode, meta, canEdit, theme, showOutput,
   onDirtyChange, onFileChanged, onToggleTheme, onToggleOutput,
+  onPresenceEvent, onPresenceReset, onFilesChanged,
 }) {
   const toast = useToast()
   const { user } = useAuth()
   const editorRef = useRef(null)
-  const [editor, setEditor] = useState(null) // set once Monaco has mounted
+  const providerRef = useRef(null)
+  const handlersRef = useRef({}) // always points to the latest callbacks
+  const [editor, setEditor] = useState(null)
 
-  const [content, setContent] = useState('')           // text currently in the editor
-  const [savedContent, setSavedContent] = useState('') // last saved snapshot (server)
+  const [content, setContent] = useState('')
+  const [savedContent, setSavedContent] = useState('')
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [saving, setSaving] = useState(false)
   const [fontSize, setFontSize] = useState(14)
   const [cursor, setCursor] = useState({ line: 1, column: 1 })
   const [showVersions, setShowVersions] = useState(false)
-
   const [status, setStatus] = useState('connecting')
-  const [ready, setReady] = useState(false) // true after the FIRST sync with the server
+  const [ready, setReady] = useState(false)
 
-  // Before the first sync the editor is empty, so don't claim "unsaved changes"
   const dirty = ready && content !== savedContent
+  const connected = status === 'connected'
 
   useEffect(() => {
     onDirtyChange(dirty)
   }, [dirty, onDirtyChange])
 
-  // Load the last SAVED snapshot (used only for the unsaved indicator and versions).
-  // The live text itself comes through Yjs.
+  // When this pane disappears (file switched or deleted), the dirty flag must reset
+  useEffect(() => () => onDirtyChange(false), [onDirtyChange])
+
   useEffect(() => {
     let ignore = false
     getFile(roomCode, meta.id)
@@ -61,19 +64,49 @@ export default function EditorPane({
     }
   }, [roomCode, meta.id])
 
+  // Handle JSON events pushed by the server
+  const handleText = async (event) => {
+    if (event.type === 'saved') {
+      try {
+        const file = await getFile(roomCode, meta.id)
+        setSavedContent(file.content) // everyone's "unsaved" indicator updates
+        onFileChanged({
+          id: file.id, name: file.name,
+          language: file.language, updated_at: file.updated_at,
+        })
+        if (event.by !== user.username) toast.info(`${event.by} saved this file`)
+      } catch {
+        /* the next save event will fix it */
+      }
+    } else if (event.type === 'files_changed') {
+      onFilesChanged()
+    } else {
+      onPresenceEvent(event)
+    }
+  }
+
+  // Keep the ref current after every render. The provider (created once per file)
+  // calls through this ref, so it never uses stale callbacks.
+  useEffect(() => {
+    handlersRef.current = {
+      onText: handleText,
+      onOpen: onPresenceReset,
+      onClose: onPresenceReset,
+    }
+  })
+
   // ---------------- Real-time collaboration ----------------
   useEffect(() => {
     if (!editor) return
 
     const doc = new Y.Doc()
-    const yText = doc.getText('content') // same name as TEXT_KEY on the server
+    const yText = doc.getText('content')
     const awareness = new Awareness(doc)
     awareness.setLocalStateField('user', {
       name: user.username,
       color: colorFor(user.username),
     })
 
-    // Inject CSS for remote cursors whenever someone moves or joins
     const style = document.createElement('style')
     document.head.appendChild(style)
     const renderCursors = () => {
@@ -88,15 +121,19 @@ export default function EditorPane({
       awareness,
       onStatus: setStatus,
       onSynced: () => setReady(true),
+      onOpen: () => handlersRef.current.onOpen?.(),
+      onClose: () => handlersRef.current.onClose?.(),
+      onText: (event) => handlersRef.current.onText?.(event),
     })
+    providerRef.current = provider
 
-    // The glue: Monaco text <-> Yjs text (and cursors <-> awareness)
     const binding = new MonacoBinding(yText, editor.getModel(), new Set([editor]), awareness)
 
     return () => {
       awareness.off('change', renderCursors)
       binding.destroy()
       provider.destroy()
+      providerRef.current = null
       awareness.destroy()
       doc.destroy()
       style.remove()
@@ -105,6 +142,10 @@ export default function EditorPane({
 
   const save = useCallback(async () => {
     if (!canEdit || saving || !ready) return
+    if (!connected) {
+      toast.error('You are offline. Reconnect before saving.')
+      return
+    }
     if (content === savedContent) {
       toast.info('No changes to save.')
       return
@@ -123,7 +164,7 @@ export default function EditorPane({
     } finally {
       setSaving(false)
     }
-  }, [canEdit, saving, ready, content, savedContent, roomCode, meta.id, onFileChanged, toast])
+  }, [canEdit, saving, ready, connected, content, savedContent, roomCode, meta.id, onFileChanged, toast])
 
   const saveRef = useRef(save)
   useEffect(() => {
@@ -139,7 +180,7 @@ export default function EditorPane({
     editorInstance.onDidChangeCursorPosition((e) =>
       setCursor({ line: e.position.lineNumber, column: e.position.column }),
     )
-    setEditor(editorInstance) // this triggers the collaboration effect above
+    setEditor(editorInstance)
     editorInstance.focus()
   }
 
@@ -160,7 +201,6 @@ export default function EditorPane({
     action.run()
   }
 
-  // Restoring a version is now an edit like any other: it flows through Yjs to everyone.
   const loadVersion = (text) => {
     const ed = editorRef.current
     const model = ed?.getModel()
@@ -206,14 +246,32 @@ export default function EditorPane({
           <button className="btn btn-secondary" disabled
                   title="Code execution is disabled: it needs a secure sandbox">▶ Run</button>
           <button className="btn btn-primary" onClick={save}
-                  disabled={!canEdit || saving || !ready} title="Save (Ctrl+S)">
+                  disabled={!canEdit || saving || !ready || !connected}
+                  title="Save (Ctrl+S)">
             {saving ? 'Saving...' : 'Save'}
           </button>
         </div>
       </div>
 
+      {status === 'disconnected' && (
+        <div className="banner banner-warn" role="alert">
+          <span>
+            You're offline. Keep typing: your edits stay in this tab and sync
+            automatically when the connection returns. Don't close the tab before then.
+          </span>
+          <button className="btn btn-secondary" onClick={() => providerRef.current?.reconnectNow()}>
+            Retry now
+          </button>
+        </div>
+      )}
+      {status === 'denied' && (
+        <div className="banner banner-error" role="alert">
+          <span>You no longer have access to this file (removed, deleted, or logged out).</span>
+          <a className="btn btn-secondary" href="/dashboard">Back to dashboard</a>
+        </div>
+      )}
+
       <div className="editor-surface">
-        {/* No `value` prop on purpose: Yjs now owns the text, Monaco only displays it. */}
         <Editor
           height="100%"
           language={meta.language}
@@ -223,8 +281,7 @@ export default function EditorPane({
           loading={<p className="muted pad">Loading editor...</p>}
           options={{
             fontSize,
-            // Locked until the first sync, so nobody types into a still-empty document
-            readOnly: !canEdit || !ready,
+            readOnly: !canEdit || !ready || status === 'denied',
             lineNumbers: 'on',
             autoIndent: 'full',
             tabSize: 4,
@@ -241,7 +298,7 @@ export default function EditorPane({
           {!canEdit
             ? 'Read-only (viewer)'
             : status === 'denied'
-              ? 'You no longer have access to this file'
+              ? 'No access'
               : !ready
                 ? 'Syncing...'
                 : dirty

@@ -1,7 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import useAuth from '../../hooks/useAuth'
+import usePresence from '../../hooks/usePresence'
 import useToast from '../../hooks/useToast'
 import { getErrorMessages } from '../../services/errors'
 import { createFile, deleteFile, listFiles, updateFile } from '../../services/files'
+import { colorFor } from '../../utils/collab'
 import '../../styles/ide.css'
 import EditorPane from './EditorPane'
 import FileExplorer from './FileExplorer'
@@ -13,13 +16,15 @@ function readTheme() {
   try {
     return localStorage.getItem('codearena-theme') || 'dark'
   } catch {
-    return 'dark' // storage can be blocked in private mode
+    return 'dark'
   }
 }
 
 export default function IdeLayout({ room }) {
   const toast = useToast()
+  const { user } = useAuth()
   const canEdit = room.role !== 'viewer'
+  const presence = usePresence(user, toast)
 
   const [files, setFiles] = useState([])
   const [activeId, setActiveId] = useState(null)
@@ -30,7 +35,6 @@ export default function IdeLayout({ room }) {
   const [explorerWidth, setExplorerWidth] = useState(220)
   const [showOutput, setShowOutput] = useState(true)
 
-  // Load the file list
   useEffect(() => {
     let ignore = false
     listFiles(room.code)
@@ -46,7 +50,20 @@ export default function IdeLayout({ room }) {
     }
   }, [room.code])
 
-  // Browser warning if the tab is closed or refreshed with unsaved changes
+  // Someone created, renamed or deleted a file: reload the list
+  const refreshFiles = useCallback(async () => {
+    try {
+      const data = await listFiles(room.code)
+      setFiles(data)
+      // If my open file was deleted, move to the first remaining one
+      setActiveId((current) =>
+        data.some((f) => f.id === current) ? current : (data[0]?.id ?? null),
+      )
+    } catch {
+      /* ignore: the next event will retry */
+    }
+  }, [room.code])
+
   useEffect(() => {
     if (!dirty) return
     const warn = (e) => {
@@ -63,7 +80,7 @@ export default function IdeLayout({ room }) {
     try {
       localStorage.setItem('codearena-theme', next)
     } catch {
-      /* ignore: the theme just won't be remembered */
+      /* ignore */
     }
   }
 
@@ -74,11 +91,13 @@ export default function IdeLayout({ room }) {
     setActiveId(id)
   }
 
-  // Merge updated info (name, language, updated_at) into the file list
-  const handleFileChanged = (updated) =>
-    setFiles((list) =>
-      list.map((f) => (f.id === updated.id ? { ...f, ...updated } : f)).sort(byName),
-    )
+  const handleFileChanged = useCallback(
+    (updated) =>
+      setFiles((list) =>
+        list.map((f) => (f.id === updated.id ? { ...f, ...updated } : f)).sort(byName),
+      ),
+    [],
+  )
 
   const handleCreate = async (name) => {
     try {
@@ -118,7 +137,6 @@ export default function IdeLayout({ room }) {
     }
   }
 
-  // Drag the divider to resize the explorer (pointer events work for mouse and touch)
   const startResize = (e) => {
     e.preventDefault()
     const startX = e.clientX
@@ -133,7 +151,6 @@ export default function IdeLayout({ room }) {
     window.addEventListener('pointerup', onUp)
   }
 
-  // Keyboard users can resize with the arrow keys
   const resizeByKey = (e) => {
     if (e.key === 'ArrowLeft') setExplorerWidth((w) => Math.max(160, w - 20))
     if (e.key === 'ArrowRight') setExplorerWidth((w) => Math.min(400, w + 20))
@@ -153,6 +170,25 @@ export default function IdeLayout({ room }) {
             onSelect={selectFile} onCreate={handleCreate}
             onRename={handleRename} onDelete={handleDelete}
           />
+
+          <div className="presence">
+            <div className="explorer-header">
+              <span>ONLINE ({presence.users.length})</span>
+            </div>
+            <ul className="presence-list" aria-label="Online participants">
+              {presence.users.map((u) => (
+                <li key={u.id}>
+                  <span className="avatar" style={{ background: colorFor(u.username) }}
+                        aria-hidden="true">
+                    {u.username.charAt(0).toUpperCase()}
+                  </span>
+                  <span className="presence-name">
+                    {u.username}{u.you ? ' (you)' : ''}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
         </aside>
 
         <div
@@ -162,15 +198,20 @@ export default function IdeLayout({ room }) {
         />
 
         <section className="ide-main">
-          {meta && (
+          {meta ? (
             <EditorPane
-              key={meta.id} /* new file = fresh pane = fresh state */
+              key={meta.id}
               roomCode={room.code} meta={meta} canEdit={canEdit}
               theme={theme} showOutput={showOutput}
               onDirtyChange={setDirty} onFileChanged={handleFileChanged}
               onToggleTheme={toggleTheme}
               onToggleOutput={() => setShowOutput((v) => !v)}
+              onPresenceEvent={presence.handleEvent}
+              onPresenceReset={presence.reset}
+              onFilesChanged={refreshFiles}
             />
+          ) : (
+            <p className="muted pad">No files in this room.</p>
           )}
           {showOutput && <OutputPanel onClose={() => setShowOutput(false)} />}
         </section>

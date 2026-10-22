@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from editor.utils import close_file
+from editor.utils import close_file, notify_files_changed, notify_saved
 
 from .access import get_membership, require_editor
 from .file_serializers import (
@@ -76,6 +77,7 @@ class FileListCreateView(APIView):
             )
         except IntegrityError:  # two people created the same name at once
             return Response(DUPLICATE_NAME, status=status.HTTP_400_BAD_REQUEST)
+        notify_files_changed(room.id)
         return Response(FileSummarySerializer(file).data, status=status.HTTP_201_CREATED)
 
 
@@ -107,6 +109,7 @@ class FileDetailView(APIView):
         if "language" in data:
             file.language = data["language"]
         file.save()
+        notify_files_changed(membership.room_id)
         return Response(FileSummarySerializer(file).data)
 
     def delete(self, request, code, file_id):
@@ -120,6 +123,7 @@ class FileDetailView(APIView):
             )
         file.delete()
         close_file(file_id)
+        notify_files_changed(membership.room_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -136,6 +140,8 @@ class FileSaveView(APIView):
         serializer = SaveSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         content = serializer.validated_data["content"]
+        changed = False
+
 
         with transaction.atomic():
             # select_for_update locks this row until the block ends, so two
@@ -146,6 +152,7 @@ class FileSaveView(APIView):
                 room=membership.room,
             )
             if content != file.content:  # no change = no new version
+                changed = True
                 file.content = content
                 file.updated_by = request.user
                 file.save()
@@ -162,6 +169,9 @@ class FileSaveView(APIView):
                 Room.objects.filter(pk=membership.room_id).update(
                     updated_at=timezone.now()
                 )
+                
+        if changed:  # notify only after the transaction has been committed
+            notify_saved(file.pk, request.user.username)  
 
         return Response(FileDetailSerializer(file).data)
 

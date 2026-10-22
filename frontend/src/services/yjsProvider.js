@@ -10,7 +10,6 @@ const MSG = { SYNC_REQUEST: 0, UPDATE: 1, AWARENESS: 2, SYNCED: 3, AWARENESS_QUE
 const FATAL_CLOSE_CODES = new Set([4401, 4403, 4404]) // don't retry these
 const MAX_BACKOFF_MS = 10000
 
-// [type byte][payload bytes]
 function frame(type, payload) {
   const body = payload ?? new Uint8Array(0)
   const out = new Uint8Array(body.length + 1)
@@ -20,30 +19,39 @@ function frame(type, payload) {
 }
 
 export default class YjsProvider {
-  constructor({ roomCode, fileId, doc, awareness, onStatus, onSynced }) {
+  constructor({
+    roomCode, fileId, doc, awareness,
+    onStatus, onSynced, onOpen, onClose, onText,
+  }) {
     const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
     this.url = `${scheme}://${window.location.host}/ws/rooms/${roomCode}/files/${fileId}/`
     this.doc = doc
     this.awareness = awareness
     this.onStatus = onStatus
     this.onSynced = onSynced
+    this.onOpen = onOpen
+    this.onClose = onClose
+    this.onText = onText // JSON events: presence, saved, files_changed
     this.ws = null
     this.timer = null
     this.attempts = 0
     this.destroyed = false
+    this.denied = false
 
-    // Local edit -> send it. Edits that came FROM the server carry origin === this,
-    // and are skipped: that is what prevents infinite update loops.
     this.handleDocUpdate = (update, origin) => {
       if (origin !== this) this.send(frame(MSG.UPDATE, update))
     }
     this.handleAwarenessUpdate = ({ added, updated, removed }, origin) => {
-      if (origin !== 'local') return // only send changes made by this user
+      if (origin !== 'local') return
       const changed = [...added, ...updated, ...removed]
       this.send(frame(MSG.AWARENESS, encodeAwarenessUpdate(awareness, changed)))
     }
+    // When the internet comes back, reconnect immediately instead of waiting
+    this.handleOnline = () => this.reconnectNow()
+
     doc.on('update', this.handleDocUpdate)
     awareness.on('update', this.handleAwarenessUpdate)
+    window.addEventListener('online', this.handleOnline)
 
     this.connect()
   }
@@ -64,6 +72,15 @@ export default class YjsProvider {
     }
   }
 
+  // Used by the "Retry now" button and the browser's "online" event
+  reconnectNow() {
+    if (this.destroyed || this.denied) return
+    if (this.ws && this.ws.readyState <= WebSocket.OPEN) return // already trying
+    clearTimeout(this.timer)
+    this.attempts = 0
+    this.connect()
+  }
+
   connect() {
     if (this.destroyed) return
     this.setStatus('connecting')
@@ -75,7 +92,7 @@ export default class YjsProvider {
       if (this.ws !== ws) return
       this.attempts = 0
       this.setStatus('connected')
-      // Tell the server what we have. This also uploads edits made while offline.
+      this.onOpen?.() // clears the old presence list; the server re-sends it
       this.send(frame(MSG.SYNC_REQUEST, Y.encodeStateVector(this.doc)))
       this.sendAwareness()
     }
@@ -83,7 +100,11 @@ export default class YjsProvider {
     ws.onmessage = (event) => {
       if (this.ws !== ws) return
       try {
-        this.handleMessage(new Uint8Array(event.data))
+        if (typeof event.data === 'string') {
+          this.onText?.(JSON.parse(event.data)) // JSON event
+        } else {
+          this.handleMessage(new Uint8Array(event.data)) // binary Yjs message
+        }
       } catch (err) {
         console.error('Bad collaboration message', err)
       }
@@ -92,8 +113,8 @@ export default class YjsProvider {
     ws.onclose = (event) => {
       if (this.ws !== ws) return
       this.ws = null
+      this.onClose?.()
 
-      // Remote cursors would be stale now, so remove them
       const others = Array.from(this.awareness.getStates().keys()).filter(
         (id) => id !== this.doc.clientID,
       )
@@ -101,11 +122,11 @@ export default class YjsProvider {
 
       if (this.destroyed) return
       if (FATAL_CLOSE_CODES.has(event.code)) {
-        this.setStatus('denied') // not logged in / removed / not a member
+        this.denied = true
+        this.setStatus('denied')
         return
       }
       this.setStatus('disconnected')
-      // Exponential backoff with jitter: ~0.5s, 1s, 2s, 4s ... max 10s
       const base = Math.min(MAX_BACKOFF_MS, 500 * 2 ** this.attempts)
       this.attempts += 1
       this.timer = setTimeout(() => this.connect(), base * (0.5 + Math.random() / 2))
@@ -117,11 +138,10 @@ export default class YjsProvider {
     const payload = data.subarray(1)
     switch (type) {
       case MSG.SYNC_REQUEST:
-        // The server asks what it is missing: reply with only the difference
         this.send(frame(MSG.UPDATE, Y.encodeStateAsUpdate(this.doc, payload)))
         break
       case MSG.UPDATE:
-        Y.applyUpdate(this.doc, payload, this) // origin = this, so we don't echo it back
+        Y.applyUpdate(this.doc, payload, this)
         break
       case MSG.AWARENESS:
         applyAwarenessUpdate(this.awareness, payload, this)
@@ -140,7 +160,7 @@ export default class YjsProvider {
   destroy() {
     this.destroyed = true
     clearTimeout(this.timer)
-    // Announce "I'm gone" so others remove our cursor immediately
+    window.removeEventListener('online', this.handleOnline)
     this.awareness.setLocalState(null)
     this.doc.off('update', this.handleDocUpdate)
     this.awareness.off('update', this.handleAwarenessUpdate)

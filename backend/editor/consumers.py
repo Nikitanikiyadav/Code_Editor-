@@ -1,4 +1,6 @@
+import json
 import logging
+import uuid
 
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
@@ -41,14 +43,14 @@ class FileSyncConsumer(AsyncWebsocketConsumer):
     live = None
     joined = ()
     can_write = False
+    conn_id = None          # random public id for this connection
+    me = None               # {"id":..., "username":...} taken from the session
+    room_group_name = None
 
     async def connect(self):
-        # Accept first, then close with a code if rejected. A close *before*
-        # accept shows up in the browser as a generic failure, so the client
-        # couldn't tell "no access" from "network down".
         await self.accept()
 
-        user = self.scope["user"]  # filled in from the session cookie
+        user = self.scope["user"]
         if not user.is_authenticated:
             await self.close(code=CLOSE_UNAUTHENTICATED)
             return
@@ -57,7 +59,7 @@ class FileSyncConsumer(AsyncWebsocketConsumer):
         file_id = int(kwargs["file_id"])
 
         access = await get_access(user, kwargs["code"], file_id)
-        if access is None:  # same answer for "doesn't exist" and "not a member"
+        if access is None:
             await self.close(code=CLOSE_NOT_FOUND)
             return
         room_id, role = access
@@ -69,43 +71,60 @@ class FileSyncConsumer(AsyncWebsocketConsumer):
             await self.close(code=CLOSE_NOT_FOUND)
             return
 
+        # Identity comes from the authenticated session, NEVER from the client
+        self.conn_id = uuid.uuid4().hex[:12]
+        self.me = {"id": user.id, "username": user.username}
+
         self.group = file_group(file_id)
-        groups = [self.group, room_group(room_id), member_group(room_id, user.id)]
+        self.room_group_name = room_group(room_id)
+        groups = [self.group, self.room_group_name, member_group(room_id, user.id)]
         for group in groups:
             await self.channel_layer.group_add(group, self.channel_name)
         self.joined = groups
 
-        # Step 1 of the sync: tell the client what the server already has
         await self.send(bytes_data=bytes([SYNC_REQUEST]) + self.live.doc.get_state())
-        # Ask everyone else to resend their cursor so the newcomer sees them
         await self.channel_layer.group_send(
             self.group, {"type": "peer.joined", "sender": self.channel_name}
+        )
+        # Presence: announce myself to the whole room
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type": "presence.hello",
+                "channel": self.channel_name,
+                "conn": self.conn_id,
+                "user": self.me,
+            },
         )
 
     async def disconnect(self, code):
         for group in self.joined:
             await self.channel_layer.group_discard(group, self.channel_name)
+        if self.room_group_name:
+            await self.channel_layer.group_send(
+                self.room_group_name,
+                {"type": "presence.bye", "conn": self.conn_id},
+            )
         if self.live is not None:
             await docs.release(self.live.file_id)
             self.live = None
 
     async def receive(self, text_data=None, bytes_data=None):
         if not bytes_data or self.live is None:
-            return
+            return  # text frames from the client are ignored
         if len(bytes_data) > MAX_MESSAGE_BYTES:
-            await self.close(code=1009)  # "message too big"
+            await self.close(code=1009)
             return
 
         kind, payload = bytes_data[0], bytes_data[1:]
 
         if kind == SYNC_REQUEST:
-            # Client sent its state; reply with only what it is missing
             diff = self.live.doc.get_update(payload)
             await self.send(bytes_data=bytes([UPDATE]) + diff)
             await self.send(bytes_data=bytes([SYNCED]))
 
         elif kind == UPDATE:
-            if not self.can_write:  # viewers can never change the document
+            if not self.can_write:
                 return
             try:
                 self.live.doc.apply_update(payload)
@@ -124,14 +143,15 @@ class FileSyncConsumer(AsyncWebsocketConsumer):
             {"type": "relay", "data": data, "sender": self.channel_name},
         )
 
-    # ---- handlers for messages that arrive from the channel layer ----
+    async def _send_json(self, payload):
+        await self.send(text_data=json.dumps(payload))
+
+    # ---- Yjs relay ----
     async def relay(self, event):
         if event["sender"] == self.channel_name or self.live is None:
-            return  # don't echo to the sender
+            return
         data = event["data"]
         if data[0] == UPDATE:
-            # Keeps this process's document current when connections are spread
-            # over several server processes. Applying twice is harmless.
             try:
                 self.live.doc.apply_update(data[1:])
             except Exception:
@@ -141,6 +161,38 @@ class FileSyncConsumer(AsyncWebsocketConsumer):
     async def peer_joined(self, event):
         if event["sender"] != self.channel_name:
             await self.send(bytes_data=bytes([AWARENESS_QUERY]))
+
+    # ---- presence ----
+    async def presence_hello(self, event):
+        """Someone new arrived in the room."""
+        if event["conn"] == self.conn_id:
+            return
+        await self._send_json(
+            {"type": "presence_join", "conn": event["conn"], "user": event["user"]}
+        )
+        # Answer the newcomer directly so they learn that we are here too
+        await self.channel_layer.send(
+            event["channel"],
+            {"type": "presence.here", "conn": self.conn_id, "user": self.me},
+        )
+
+    async def presence_here(self, event):
+        """A direct reply to our own 'hello': someone who was already here."""
+        await self._send_json(
+            {"type": "presence_here", "conn": event["conn"], "user": event["user"]}
+        )
+
+    async def presence_bye(self, event):
+        if event["conn"] == self.conn_id:
+            return
+        await self._send_json({"type": "presence_leave", "conn": event["conn"]})
+
+    # ---- other live events ----
+    async def file_saved(self, event):
+        await self._send_json({"type": "saved", "by": event["by"]})
+
+    async def files_changed(self, event):
+        await self._send_json({"type": "files_changed"})
 
     async def force_close(self, event):
         await self.close(code=CLOSE_REVOKED)
