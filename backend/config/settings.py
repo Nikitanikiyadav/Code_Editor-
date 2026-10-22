@@ -86,9 +86,16 @@ REST_FRAMEWORK = {
         "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
-        "rest_framework.permissions.IsAuthenticated",  # locked by default
+        "rest_framework.permissions.IsAuthenticated",
     ],
+    # Rate limiting: max 20 login/register attempts per minute per IP
+    "DEFAULT_THROTTLE_RATES": {"auth": "20/min"},
 }
+
+# ---- Cookie security ----
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_HTTPONLY = True  # JavaScript can't read the session cookie
 
 # ---- CORS / CSRF (React dev server talks to Django) ----
 CORS_ALLOWED_ORIGINS = [
