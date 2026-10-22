@@ -13,6 +13,7 @@ from .serializers import JoinRoomSerializer, RoomSerializer, RoomWriteSerializer
 
 
 class RoomViewSet(viewsets.GenericViewSet):
+    throttle_scope = None                 # lets @action(throttle_scope=...) work
     lookup_field = "code"                 # URLs look like /api/rooms/ABC123/
     lookup_value_regex = "[A-Za-z0-9]+"
 
