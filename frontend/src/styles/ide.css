@@ -83,3 +83,18 @@
   .ide-resizer { display: none; }
   .output-panel { height: 110px; }
 }
+
+/* ---------- Connection status ---------- */
+.conn { font-size: 0.78rem; margin-left: 0.5rem; }
+.conn-connected { color: #3fb950; }
+.conn-connecting, .conn-disconnected { color: #e2a93b; }
+.conn-denied { color: #f85149; }
+
+/* ---------- Remote cursors (colors are added per user from JavaScript) ---------- */
+.yRemoteSelection { opacity: 1; }
+.yRemoteSelectionHead { position: absolute; height: 100%; box-sizing: border-box; }
+.yRemoteSelectionHead::after {
+  position: absolute; top: -1.3em; left: -2px; padding: 0 4px;
+  font-size: 11px; line-height: 1.3em; color: #fff; white-space: nowrap;
+  border-radius: 3px; pointer-events: none; z-index: 10;
+}

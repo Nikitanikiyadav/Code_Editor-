@@ -118,6 +118,7 @@ class RoomFile(models.Model):
     name = models.CharField(max_length=100)
     language = models.CharField(max_length=20, choices=Room.Language.choices)
     content = models.TextField(blank=True, default="")
+    yjs_state = models.BinaryField(null=True, blank=True, editable=False)
     updated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True, blank=True,

@@ -6,6 +6,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
+from editor.utils import close_room, kick_user
 
 from .models import Room, RoomParticipant
 from .permissions import IsRoomOwner
@@ -101,11 +102,13 @@ class RoomViewSet(viewsets.GenericViewSet):
         return self._room_response(room)
 
     # DELETE /api/rooms/<code>/   (owner only)
+        # DELETE /api/rooms/<code>/   (owner only)
     def destroy(self, request, code=None):
         room = self.get_object()
+        close_room(room.id)  # disconnect everyone, before the data disappears
         room.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
-
+    
     # GET /api/rooms/recent/
     @action(detail=False, methods=["get"])
     def recent(self, request):
@@ -155,4 +158,5 @@ class RoomViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         RoomParticipant.objects.filter(room=room, user=request.user).delete()
+        kick_user(room.id, request.user.id)  # close their open editor sockets
         return Response(status=status.HTTP_204_NO_CONTENT)

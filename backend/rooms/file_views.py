@@ -6,6 +6,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
+from editor.utils import close_file
 
 from .access import get_membership, require_editor
 from .file_serializers import (
@@ -118,6 +119,7 @@ class FileDetailView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         file.delete()
+        close_file(file_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
