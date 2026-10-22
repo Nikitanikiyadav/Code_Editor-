@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import IdeLayout from '../components/ide/IdeLayout'
 import Navbar from '../components/Navbar'
 import { languageLabel } from '../constants/languages'
 import useToast from '../hooks/useToast'
-import { deleteRoom, getRoom, leaveRoom } from '../services/rooms'
 import { getErrorMessages } from '../services/errors'
-import { formatDate } from '../utils/format'
+import { deleteRoom, getRoom, leaveRoom } from '../services/rooms'
 
 export default function Room() {
   const { code } = useParams()
@@ -63,7 +63,7 @@ export default function Room() {
     return (<><Navbar /><main className="container"><p className="muted">Loading room...</p></main></>)
   }
 
-  // Same message whether the room doesn't exist OR you aren't a member (no information leak)
+  // Same message whether the room doesn't exist OR you aren't a member
   if (notFound) {
     return (
       <>
@@ -83,37 +83,31 @@ export default function Room() {
   const isOwner = room.role === 'owner'
 
   return (
-    <>
+    <div className="room-page">
       <Navbar />
-      <main className="container">
-        <section className="dashboard-header">
-          <div>
-            <h1>{room.name}</h1>
-            <p className="muted">
-              {languageLabel(room.language)} · {room.participant_count} member(s) ·
-              Updated {formatDate(room.updated_at)}
-            </p>
-          </div>
-          <div className="button-row">
-            <button className="btn btn-secondary" onClick={() => copy(room.code, 'Room code copied')}>
-              Copy code: {room.code}
-            </button>
-            <button className="btn btn-secondary" onClick={() => copy(inviteLink, 'Invite link copied')}>
-              Copy invite link
-            </button>
-            {isOwner ? (
-              <button className="btn btn-danger" onClick={handleDelete}>Delete room</button>
-            ) : (
-              <button className="btn btn-secondary" onClick={handleLeave}>Leave room</button>
-            )}
-          </div>
-        </section>
-
-        <div className="empty-state">
-          <h3>Editor coming in Phase 6</h3>
-          <p className="muted">The Monaco code editor will appear here.</p>
+      <div className="room-header">
+        <div>
+          <h1>{room.name}</h1>
+          <p className="muted small">
+            {languageLabel(room.language)} · {room.participant_count} member(s) · You are {room.role}
+          </p>
         </div>
-      </main>
-    </>
+        <div className="button-row">
+          <button className="btn btn-secondary" onClick={() => copy(room.code, 'Room code copied')}>
+            Code: {room.code}
+          </button>
+          <button className="btn btn-secondary" onClick={() => copy(inviteLink, 'Invite link copied')}>
+            Copy invite link
+          </button>
+          {isOwner ? (
+            <button className="btn btn-danger" onClick={handleDelete}>Delete room</button>
+          ) : (
+            <button className="btn btn-secondary" onClick={handleLeave}>Leave room</button>
+          )}
+        </div>
+      </div>
+
+      <IdeLayout room={room} />
+    </div>
   )
 }

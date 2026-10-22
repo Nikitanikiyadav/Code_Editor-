@@ -1,0 +1,85 @@
+/* ---------- Room page: header on top, IDE fills the rest ---------- */
+.room-page { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
+.room-header {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 0.75rem; flex-wrap: wrap; padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.room-header h1 { font-size: 1.1rem; margin: 0; }
+
+/* ---------- IDE shell (variables here give us the light theme) ---------- */
+.ide {
+  --bg: #1e1e1e; --text: #d4d4d4; --panel: #252526;
+  --border: #3c3c3c; --muted: #9d9d9d;
+  flex: 1; min-height: 0; display: flex;
+  background: var(--bg); color: var(--text);
+}
+.ide.light { --bg: #ffffff; --text: #1e1e1e; --panel: #f3f3f3; --border: #d4d4d4; --muted: #6b6b6b; }
+.ide.light .btn-secondary { background: #e8e8e8; color: #1e1e1e; border-color: #cfcfcf; }
+.ide.light select, .ide.light input { background: #fff; color: #1e1e1e; }
+.pad { padding: 1rem; }
+
+.ide-body { flex: 1; display: flex; min-width: 0; min-height: 0; }
+.ide-explorer { flex: none; background: var(--panel); overflow-y: auto; }
+.ide-resizer { width: 5px; flex: none; cursor: col-resize; background: var(--border); }
+.ide-resizer:hover, .ide-resizer:focus-visible { background: var(--accent); outline: none; }
+.ide-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+/* ---------- Explorer ---------- */
+.explorer-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0.5rem 0.75rem; font-size: 0.75rem; letter-spacing: 0.08em; color: var(--muted);
+}
+.explorer-new { padding: 0 0.5rem 0.5rem; }
+.explorer-new input { width: 100%; padding: 0.35rem 0.5rem; font-size: 0.9rem; }
+.explorer-list { list-style: none; margin: 0; padding: 0; }
+.file-row { display: flex; align-items: center; }
+.file-row.active { background: #0e7ad144; }
+.file-row:hover { background: #80808022; }
+.file-name {
+  flex: 1; text-align: left; background: none; border: none; color: inherit;
+  padding: 0.4rem 0.75rem; cursor: pointer; font-size: 0.9rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.file-name:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.file-actions { display: none; padding-right: 0.25rem; }
+.file-row:hover .file-actions, .file-row:focus-within .file-actions { display: flex; }
+.small-icon { font-size: 0.95rem; padding: 0.15rem 0.35rem; }
+
+/* ---------- Editor pane ---------- */
+.editor-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.editor-toolbar {
+  display: flex; justify-content: space-between; align-items: center;
+  flex-wrap: wrap; gap: 0.4rem; padding: 0.35rem 0.5rem;
+  background: var(--panel); border-bottom: 1px solid var(--border);
+}
+.editor-tab { display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; padding: 0 0.4rem; }
+.dirty-dot { color: #e2a93b; font-size: 0.8rem; }
+.toolbar-group { display: flex; gap: 0.35rem; flex-wrap: wrap; align-items: center; }
+.toolbar-group .btn { padding: 0.3rem 0.65rem; font-size: 0.85rem; }
+.toolbar-group select { padding: 0.3rem 0.5rem; font-size: 0.85rem; }
+.editor-surface { flex: 1; min-height: 0; }
+.statusbar {
+  display: flex; justify-content: space-between; padding: 0.2rem 0.75rem;
+  background: var(--accent); color: white; font-size: 0.78rem;
+}
+.status-dirty { font-weight: 600; }
+
+/* ---------- Output panel ---------- */
+.output-panel { height: 150px; flex: none; background: var(--panel); border-top: 1px solid var(--border); padding: 0 0.75rem 0.5rem; overflow-y: auto; }
+.output-header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.08em; color: var(--muted); padding: 0.4rem 0; }
+
+/* ---------- Version list (inside the modal) ---------- */
+.version-list { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow-y: auto; }
+.version-list li { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 0.6rem 0; border-bottom: 1px solid var(--border); }
+.version-list p { margin: 0; }
+
+/* ---------- Mobile: explorer on top, editor below ---------- */
+@media (max-width: 700px) {
+  .room-page { height: auto; min-height: 100dvh; }
+  .ide { flex: none; height: 80vh; min-height: 480px; }
+  .ide-body { flex-direction: column; }
+  .ide-explorer { width: 100% !important; max-height: 120px; border-bottom: 1px solid var(--border); }
+  .ide-resizer { display: none; }
+  .output-panel { height: 110px; }
+}
