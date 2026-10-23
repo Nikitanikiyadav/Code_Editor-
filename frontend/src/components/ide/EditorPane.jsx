@@ -24,10 +24,13 @@ export default function EditorPane({
   roomCode, meta, canEdit, theme, showOutput,
   onDirtyChange, onFileChanged, onToggleTheme, onToggleOutput,
   onPresenceEvent, onPresenceReset, onFilesChanged,
+  onRun, onStop, running,
+  
 }) {
   const toast = useToast()
   const { user } = useAuth()
   const editorRef = useRef(null)
+  const monacoRef = useRef(null)
   const providerRef = useRef(null)
   const handlersRef = useRef({}) // always points to the latest callbacks
   const [editor, setEditor] = useState(null)
@@ -173,6 +176,11 @@ export default function EditorPane({
 
   const handleMount = (editorInstance, monaco) => {
     editorRef.current = editorInstance
+    monacoRef.current = monaco
+    // An old red underline is misleading once the code changes, so remove it on edit
+    editorInstance.onDidChangeModelContent(() =>
+      monaco.editor.setModelMarkers(editorInstance.getModel(), 'codearena-run', []),
+    )
     editorInstance.addCommand(
       monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
       () => saveRef.current(),
@@ -182,6 +190,31 @@ export default function EditorPane({
     )
     setEditor(editorInstance)
     editorInstance.focus()
+  }
+
+  const handleRun = async () => {
+    const ed = editorRef.current
+    const monaco = monacoRef.current
+    const model = ed?.getModel()
+    if (!ed || !monaco || !model) return
+
+    monaco.editor.setModelMarkers(model, 'codearena-run', [])
+    // getValue() reads the live text, including edits from other people
+    const result = await onRun({ code: ed.getValue(), language: meta.language })
+
+    if (model.isDisposed()) return // the file was switched while running
+    if (result?.status === 'error' && result.error.line) {
+      const line = Math.min(result.error.line, model.getLineCount())
+      monaco.editor.setModelMarkers(model, 'codearena-run', [{
+        severity: monaco.MarkerSeverity.Error,
+        startLineNumber: line,
+        endLineNumber: line,
+        startColumn: 1,
+        endColumn: model.getLineMaxColumn(line),
+        message: `${result.error.type}: ${result.explanation.explanation}`,
+      }])
+      ed.revealLineInCenterIfOutsideViewport(line)
+    }
   }
 
   const changeLanguage = async (language) => {
@@ -243,8 +276,14 @@ export default function EditorPane({
           <button className="btn btn-secondary" onClick={onToggleOutput}>
             {showOutput ? 'Hide output' : 'Output'}
           </button>
-          <button className="btn btn-secondary" disabled
-                  title="Code execution is disabled: it needs a secure sandbox">▶ Run</button>
+            {running ? (
+            <button className="btn btn-danger" onClick={onStop}>■ Stop</button>
+          ) : (
+            <button className="btn btn-secondary" onClick={handleRun}
+                    disabled={!editor || !ready} title="Run this file in your browser">
+              ▶ Run
+            </button>
+          )}
           <button className="btn btn-primary" onClick={save}
                   disabled={!canEdit || saving || !ready || !connected}
                   title="Save (Ctrl+S)">

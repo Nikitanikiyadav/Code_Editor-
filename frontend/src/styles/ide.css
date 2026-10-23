@@ -66,7 +66,7 @@
 .status-dirty { font-weight: 600; }
 
 /* ---------- Output panel ---------- */
-.output-panel { height: 150px; flex: none; background: var(--panel); border-top: 1px solid var(--border); padding: 0 0.75rem 0.5rem; overflow-y: auto; }
+.output-panel { height: 220px; flex: none; background: var(--panel); border-top: 1px solid var(--border); padding: 0 0.75rem 0.5rem; overflow-y: auto; }
 .output-header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.08em; color: var(--muted); padding: 0.4rem 0; }
 
 /* ---------- Version list (inside the modal) ---------- */
@@ -120,3 +120,13 @@
 .banner-error { background: #5a1f1f; color: #ffd0d0; }
 .ide.light .banner-warn { background: #fff3cd; color: #5a4510; }
 .ide.light .banner-error { background: #fde0e0; color: #7a1f1f; }
+
+/* ---------- Run output ---------- */
+.output-actions { display: flex; align-items: center; gap: 0.25rem; }
+.small-btn { padding: 0.15rem 0.5rem; font-size: 0.75rem; }
+.output-body { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: Consolas, 'Courier New', monospace; font-size: 0.85rem; }
+.out-err { color: #f2777a; }
+.mono { font-family: Consolas, 'Courier New', monospace; }
+.run-ok { color: #3fb950; margin: 0.4rem 0 0; }
+.run-error { border-left: 3px solid #f85149; background: #f8514922; padding: 0.5rem 0.75rem; margin-top: 0.5rem; border-radius: 4px; font-size: 0.88rem; }
+.run-error p { margin: 0.25rem 0; }

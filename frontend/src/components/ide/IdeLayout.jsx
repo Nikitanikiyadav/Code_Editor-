@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { canRun, startRun } from '../../services/runner'
+import { explainError } from '../../utils/explainError'
 import useAuth from '../../hooks/useAuth'
 import usePresence from '../../hooks/usePresence'
 import useToast from '../../hooks/useToast'
@@ -25,6 +27,10 @@ export default function IdeLayout({ room }) {
   const { user } = useAuth()
   const canEdit = room.role !== 'viewer'
   const presence = usePresence(user, toast)
+  const MAX_OUTPUT_LINES = 1000 // stops a runaway print loop from freezing the page
+  const EMPTY_OUTPUT = { lines: [], result: null, running: false, language: null } 
+  
+
 
   const [files, setFiles] = useState([])
   const [activeId, setActiveId] = useState(null)
@@ -34,6 +40,37 @@ export default function IdeLayout({ room }) {
   const [theme, setTheme] = useState(readTheme)
   const [explorerWidth, setExplorerWidth] = useState(220)
   const [showOutput, setShowOutput] = useState(true)
+    const [output, setOutput] = useState(EMPTY_OUTPUT)
+  const stopRef = useRef(null)
+
+  const runCode = useCallback(async ({ code, language }) => {
+    setShowOutput(true)
+    if (!canRun(language)) {
+      const result = { status: 'unsupported' }
+      setOutput({ lines: [], result, running: false, language })
+      return result
+    }
+    setOutput({ lines: [], result: null, running: true, language })
+
+    const run = startRun(language, code, (text, kind) =>
+      setOutput((o) => ({
+        ...o,
+        lines: [...o.lines, { text, kind }].slice(-MAX_OUTPUT_LINES),
+      })),
+    )
+    stopRef.current = run.stop
+
+    const result = await run.done
+    stopRef.current = null
+    const full = {
+      ...result,
+      explanation: result.status === 'error' ? explainError(language, result.error) : null,
+    }
+    setOutput((o) => ({ ...o, running: false, result: full }))
+    return full
+  }, [])
+
+  const stopCode = useCallback(() => stopRef.current?.(), [])
 
   useEffect(() => {
     let ignore = false
@@ -209,12 +246,22 @@ export default function IdeLayout({ room }) {
               onPresenceEvent={presence.handleEvent}
               onPresenceReset={presence.reset}
               onFilesChanged={refreshFiles}
+              onRun={runCode}
+              onStop={stopCode}
+              running={output.running}
             />
           ) : (
             <p className="muted pad">No files in this room.</p>
           )}
-          {showOutput && <OutputPanel onClose={() => setShowOutput(false)} />}
-        </section>
+          
+          {showOutput && (
+            <OutputPanel
+              output={output}
+              onClear={() => setOutput(EMPTY_OUTPUT)}
+              onClose={() => setShowOutput(false)}
+            />
+          )}       
+          </section>
       </div>
     </div>
   )
