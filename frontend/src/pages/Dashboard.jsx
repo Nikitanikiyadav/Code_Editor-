@@ -41,7 +41,7 @@ export default function Dashboard() {
       if (scope !== 'all') params.scope = scope
       try {
         const data = await listRooms(params)
-        if (!ignore) setRooms(data)
+        if (!ignore) setRooms(Array.isArray(data) ? data : [])
       } catch {
         if (!ignore) setError('Could not load your rooms. Please try again.')
       } finally {
@@ -57,7 +57,9 @@ export default function Dashboard() {
 
   // Recently opened rooms: load once
   useEffect(() => {
-    listRecentRooms().then(setRecent).catch(() => setRecent([]))
+    listRecentRooms()
+      .then((data) => setRecent(Array.isArray(data) ? data : []))
+      .catch(() => setRecent([]))
   }, [])
 
   const handleCreated = (room) => {
