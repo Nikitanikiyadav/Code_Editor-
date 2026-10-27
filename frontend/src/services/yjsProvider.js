@@ -23,8 +23,10 @@ export default class YjsProvider {
     roomCode, fileId, doc, awareness,
     onStatus, onSynced, onOpen, onClose, onText,
   }) {
+    // Dev: same host (Vite proxies /ws). Production: set VITE_WS_URL, e.g. wss://api.example.com
     const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    this.url = `${scheme}://${window.location.host}/ws/rooms/${roomCode}/files/${fileId}/`
+    const wsBase = import.meta.env.VITE_WS_URL || `${scheme}://${window.location.host}`
+    this.url = `${wsBase.replace(/\/$/, '')}/ws/rooms/${roomCode}/files/${fileId}/`
     this.doc = doc
     this.awareness = awareness
     this.onStatus = onStatus
